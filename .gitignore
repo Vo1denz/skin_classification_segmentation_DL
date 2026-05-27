@@ -1,0 +1,47 @@
+# Python environments
+.venv/
+venv/
+env/
+.env
+.env.*
+
+# Python cache/build output
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Jupyter and editor files
+.ipynb_checkpoints/
+.vscode/
+.idea/
+
+# Model artifacts and generated inference output
+checkpoints/
+outputs/
+logs/
+*.pt
+*.pth
+*.onnx
+*.log
+
+# Downloaded/prepared datasets are too large for GitHub.
+# Keep only the dataset instructions file.
+data/*
+!data/README.md
+
+# Local sample/test uploads
+test*.jpg
+test*.jpeg
+test*.png
+test*.webp
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
