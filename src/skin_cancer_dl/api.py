@@ -11,6 +11,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+from .evaluate import evaluate_classifier
 from .inference import SkinCancerPipeline
 from .utils import read_image_rgb_from_bytes
 
@@ -134,3 +135,36 @@ async def predict_visual(file: UploadFile = File(...), top_k: int = 2) -> dict:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# ── Evaluation endpoint ──────────────────────────────────────────────
+_evaluation_cache: dict | None = None
+
+
+@app.get("/evaluate")
+def evaluate() -> dict:
+    """Evaluate classifier on the validation set and return confusion matrix + metrics."""
+    global _evaluation_cache
+    if _evaluation_cache is not None:
+        return _evaluation_cache
+
+    classifier_checkpoint = os.getenv("CLASSIFIER_CHECKPOINT") or default_checkpoint("classifier_isic2016.pt")
+    if not classifier_checkpoint:
+        raise HTTPException(status_code=500, detail="No classifier checkpoint found.")
+
+    val_dir = os.getenv("VAL_DIR", "data/classification/val")
+    if not Path(val_dir).exists():
+        raise HTTPException(status_code=404, detail=f"Validation directory not found: {val_dir}")
+
+    try:
+        result = evaluate_classifier(
+            checkpoint_path=classifier_checkpoint,
+            data_dir=val_dir,
+            batch_size=16,
+            num_workers=0,
+        )
+        _evaluation_cache = result
+        return result
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
