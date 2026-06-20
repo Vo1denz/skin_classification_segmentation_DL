@@ -81,12 +81,18 @@ def classification_transforms(image_size: int, train: bool) -> transforms.Compos
     if train:
         return transforms.Compose(
             [
-                transforms.Resize((image_size, image_size)),
+                transforms.Resize((image_size + 32, image_size + 32)),
+                transforms.RandomCrop(image_size),
                 transforms.RandomHorizontalFlip(),
-                transforms.RandomRotation(15),
-                transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.1),
+                transforms.RandomVerticalFlip(),
+                transforms.RandomRotation(30),
+                transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.85, 1.15)),
+                transforms.RandomPerspective(distortion_scale=0.15, p=0.3),
+                transforms.ColorJitter(brightness=0.25, contrast=0.25, saturation=0.2, hue=0.04),
+                transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 1.5)),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                transforms.RandomErasing(p=0.15, scale=(0.02, 0.15)),
             ]
         )
 

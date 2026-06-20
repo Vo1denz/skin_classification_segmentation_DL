@@ -11,6 +11,58 @@ The project uses a two-stage deep learning pipeline:
 
 This is a screening prototype for academic work. It is not a medical diagnosis tool.
 
+## Architecture Diagram
+
+```mermaid
+flowchart TB
+    subgraph Input ["📸 Data Input"]
+        IMG["Original Dermoscopy Image"]
+    end
+
+    subgraph Seg ["🔪 Segmentation Pipeline"]
+        UNET["U-Net Model"]
+        MASK["Lesion Mask"]
+        CROP["Segmented Lesion"]
+    end
+
+    subgraph Class ["🔬 Classification Pipeline"]
+        MOB["MobileNetV2 Classifier\n(Transfer Learning)"]
+        PRED["Prediction\n(Benign / Malignant)"]
+    end
+
+    subgraph XAI ["✨ Explainable AI (XAI)"]
+        GRAD["Grad-CAM"]
+        HEAT["Heatmap Overlay"]
+    end
+
+    subgraph Eval ["📊 Evaluation Metrics"]
+        EVAL["Accuracy · F1 Score · Recall\nConfusion Matrix"]
+    end
+
+    subgraph UI ["🌐 Web Dashboard"]
+        DASH["FastAPI + Vanilla JS\nPrediction & Visualization"]
+    end
+
+    IMG --> UNET
+    UNET --> MASK
+    MASK --> CROP
+    IMG --> CROP
+    
+    CROP --> MOB
+    MOB --> PRED
+    
+    MOB --> GRAD
+    CROP --> GRAD
+    GRAD --> HEAT
+    
+    PRED --> EVAL
+    
+    PRED --> DASH
+    HEAT --> DASH
+    MASK --> DASH
+    EVAL --> DASH
+```
+
 ## Project Layout
 
 ```text

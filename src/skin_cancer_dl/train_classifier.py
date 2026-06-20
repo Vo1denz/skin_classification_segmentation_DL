@@ -18,7 +18,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default="efficientnet_b0", choices=["efficientnet_b0", "mobilenet_v2", "resnet18"])
     parser.add_argument("--pretrained", action="store_true", help="Use torchvision pretrained ImageNet weights.")
     parser.add_argument("--freeze-backbone", action="store_true", help="Train only the final classifier head.")
+    parser.add_argument("--warmup-epochs", type=int, default=0,
+                        help="Two-phase training: freeze backbone for this many epochs, then unfreeze.")
     parser.add_argument("--no-class-weights", action="store_true", help="Disable inverse-frequency class weights.")
+    parser.add_argument("--minority-boost", type=float, default=1.0,
+                        help="Extra multiplier for the minority (highest-weight) class. >1 boosts recall.")
     parser.add_argument("--image-size", type=int, default=224)
     parser.add_argument("--val-split", type=float, default=0.2)
     parser.add_argument("--epochs", type=int, default=20)
@@ -39,10 +43,17 @@ def dataset_targets(dataset: torch.utils.data.Dataset) -> list[int]:
     raise TypeError("Cannot read targets from this dataset type.")
 
 
-def class_weights(dataset: torch.utils.data.Dataset, num_classes: int, device: torch.device) -> torch.Tensor:
+def class_weights(
+    dataset: torch.utils.data.Dataset, num_classes: int, device: torch.device,
+    minority_boost: float = 1.0,
+) -> torch.Tensor:
     targets = torch.tensor(dataset_targets(dataset), dtype=torch.long)
     counts = torch.bincount(targets, minlength=num_classes).float()
     weights = counts.sum() / counts.clamp(min=1.0)
+    # Boost the minority class (the one with the highest weight)
+    if minority_boost > 1.0:
+        max_idx = weights.argmax()
+        weights[max_idx] *= minority_boost
     weights = weights / weights.mean()
     return weights.to(device)
 
@@ -80,6 +91,24 @@ def run_epoch(
     return losses.average, accuracies.average
 
 
+def save_best(path, model, args, class_names, epoch, val_accuracy):
+    """Save checkpoint if val_accuracy is the best so far."""
+    save_checkpoint(
+        path,
+        {
+            "task": "classification",
+            "model_name": args.model,
+            "model_state": model.state_dict(),
+            "class_names": class_names,
+            "num_classes": len(class_names),
+            "image_size": args.image_size,
+            "epoch": epoch,
+            "val_accuracy": val_accuracy,
+        },
+    )
+    print(f"  >> saved={path} val_acc={val_accuracy:.4f}", flush=True)
+
+
 def main() -> None:
     args = parse_args()
     set_seed(args.seed)
@@ -97,43 +126,68 @@ def main() -> None:
 
     spec = build_classifier(args.model, num_classes=len(class_names), pretrained=args.pretrained)
     model = spec.model.to(device)
-    if args.freeze_backbone:
-        freeze_backbone(model, args.model)
 
-    trainable_parameters = [p for p in model.parameters() if p.requires_grad]
-    weights = None if args.no_class_weights else class_weights(train_loader.dataset, len(class_names), device)
+    weights = (
+        None if args.no_class_weights
+        else class_weights(train_loader.dataset, len(class_names), device, args.minority_boost)
+    )
     criterion = nn.CrossEntropyLoss(weight=weights)
-    optimizer = torch.optim.AdamW(trainable_parameters, lr=args.lr, weight_decay=1e-4)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, args.epochs))
+    print(f"Class weights: {weights}", flush=True)
 
     best_accuracy = -1.0
-    for epoch in range(1, args.epochs + 1):
+
+    # ── Phase 1: Warmup with frozen backbone ─────────────────────
+    if args.warmup_epochs > 0 and args.pretrained:
+        print(f"\n=== Phase 1: Frozen backbone warmup ({args.warmup_epochs} epochs) ===", flush=True)
+        freeze_backbone(model, args.model)
+        head_params = [p for p in model.parameters() if p.requires_grad]
+        head_optimizer = torch.optim.AdamW(head_params, lr=args.lr * 3, weight_decay=1e-4)
+
+        for epoch in range(1, args.warmup_epochs + 1):
+            train_loss, train_acc = run_epoch(model, train_loader, criterion, device, head_optimizer)
+            val_loss, val_acc = run_epoch(model, val_loader, criterion, device)
+            print(
+                f"  warmup {epoch:02d}/{args.warmup_epochs} "
+                f"train_loss={train_loss:.4f} train_acc={train_acc:.4f} "
+                f"val_loss={val_loss:.4f} val_acc={val_acc:.4f}",
+                flush=True,
+            )
+            if val_acc > best_accuracy:
+                best_accuracy = val_acc
+                save_best(args.output, model, args, class_names, epoch, val_acc)
+
+        # Unfreeze all parameters for phase 2
+        for p in model.parameters():
+            p.requires_grad = True
+        print("  >> Backbone unfrozen for fine-tuning.", flush=True)
+    elif args.freeze_backbone:
+        freeze_backbone(model, args.model)
+
+    # ── Phase 2: Full fine-tuning ────────────────────────────────
+    total_epochs = args.epochs
+    print(f"\n=== Phase 2: Full fine-tuning ({total_epochs} epochs) ===", flush=True)
+
+    trainable_parameters = [p for p in model.parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(trainable_parameters, lr=args.lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, total_epochs))
+
+    for epoch in range(1, total_epochs + 1):
         train_loss, train_accuracy = run_epoch(model, train_loader, criterion, device, optimizer)
         val_loss, val_accuracy = run_epoch(model, val_loader, criterion, device)
         scheduler.step()
 
         print(
-            f"epoch={epoch:03d} "
+            f"  epoch {epoch:03d}/{total_epochs} "
             f"train_loss={train_loss:.4f} train_acc={train_accuracy:.4f} "
-            f"val_loss={val_loss:.4f} val_acc={val_accuracy:.4f}"
+            f"val_loss={val_loss:.4f} val_acc={val_accuracy:.4f}",
+            flush=True,
         )
 
         if val_accuracy > best_accuracy:
             best_accuracy = val_accuracy
-            save_checkpoint(
-                args.output,
-                {
-                    "task": "classification",
-                    "model_name": args.model,
-                    "model_state": model.state_dict(),
-                    "class_names": class_names,
-                    "num_classes": len(class_names),
-                    "image_size": args.image_size,
-                    "epoch": epoch,
-                    "val_accuracy": best_accuracy,
-                },
-            )
-            print(f"saved={args.output} val_acc={best_accuracy:.4f}")
+            save_best(args.output, model, args, class_names, epoch, val_accuracy)
+
+    print(f"\nTraining complete. Best val_acc={best_accuracy:.4f}", flush=True)
 
 
 if __name__ == "__main__":
