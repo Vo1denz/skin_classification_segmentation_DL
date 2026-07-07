@@ -1,6 +1,20 @@
 # Skin Cancer Segmentation and Classification
+<p align="center">
+  <img src="screenshots/1.png" alt="Skin Cancer Detection Web Dashboard" width="900">
+</p>
 
-PyTorch implementation of the mini project described in `miniproject abstract new.pdf`.
+PyTorch implementation of the project described in ` project abstract new.pdf`.
+
+The project uses a two-stage deep learning pipeline:
+
+1. Segment the lesion with U-Net.
+2. Classify the segmented lesion with a transfer-learning classifier such as MobileNetV2 or EfficientNet-B0.
+3. Use inverse-frequency class weights during training to reduce class-imbalance bias.
+4. Produce Grad-CAM heatmaps so the prediction is easier to inspect.
+
+This is a screening prototype for academic work. It is not a medical diagnosis tool.
+
+PyTorch implementation of the   project described in ` project abstract new.pdf`.
 
 The project uses a two-stage deep learning pipeline:
 
