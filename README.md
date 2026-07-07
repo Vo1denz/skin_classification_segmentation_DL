@@ -1,6 +1,6 @@
 # Skin Cancer Segmentation and Classification
 <p align="center">
-  <img src="./screenshots/1.png" alt="Skin Cancer Detection Web Dashboard" width="900">
+  <img src="./screenshots/1.jpeg" alt="Skin Cancer Detection Web Dashboard" width="900">
 </p>
 
 PyTorch implementation of the project described in ` project abstract new.pdf`.
